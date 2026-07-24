@@ -1,0 +1,15 @@
+# Python / backend
+__pycache__/
+*.pyc
+backend/config.json
+backend/lumia.db
+backend/data/
+
+# Electron / node
+node_modules/
+electron/config.local.json
+
+# misc
+.venv/
+venv/
+.DS_Store

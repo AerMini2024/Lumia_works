@@ -8,7 +8,7 @@ Lumia 的软件端「本地大脑 + 桌面外壳」实现。硬件端约定见
 1. **限制开发时长**：每日额度 `n + k*m` 小时，用尽后支持一次延时（当日未用即可用）；
    延时后当日硬停；每周内每用一次延时，`k` 衰减为 `0.8*k`（周一重置）。
 2. **接收「突发奇想」**：T5AI-Core 语音 / 文本经 Orange Pi 3B 转发到服务端落库。
-3. **时长耗尽后展示今日成绩**：扫描本地 git 仓库列出当日 commits（成就墙）。
+3. **时长耗尽后展示今日成绩**：扫描本地 git 仓库并可绑定 GitHub 账号拉取当日全部 commits（成就墙）。
 4. **定时提醒**：吃饭 / 睡觉 / 喝水 / 活动；联动久坐传感 + 清闲椅拉伸。弹窗不抢焦点，
    平时缩在系统托盘，托盘右键进入设置。
 
@@ -176,7 +176,9 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 | GET  | `/api/ideas?limit=N` | 前端 | 最近灵感列表 |
 | POST | `/api/sit` | 久坐传感 | `{"seated": bool, "pressure": 0..1}` |
 | POST | `/api/chair/stretch` | 前端/本地 | `{"source": "..."}` → 转发继电器或模拟 |
-| GET  | `/api/achievements/today` | 前端 | 今日各仓库 commits |
+| GET  | `/api/achievements/today` | 前端 | 今日开发者参与的全部 commits（作者/提交者/Co-authored-by 任一匹配；本地仓库 + GitHub 双查询合并去重，时间倒序）；支持 `offset`/`limit` 分页，身份反查仅对当前页执行 |
+| POST | `/api/github/auth/start` | 前端 | 发起 Device Flow 授权，返回一次性代码与验证页地址 |
+| POST | `/api/github/auth/poll` | 前端 | 轮询授权结果，成功后自动写入用户名与令牌 |
 | GET / PUT | `/api/config` | 前端 | 读取 / 深合并更新配置 |
 
 `/api/capture/*`、`/api/sit`、`/api/chair/stretch` 与
@@ -214,6 +216,9 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 | `chair.mode` | "simulate" | `simulate` 仅日志；`relay` 转发到继电器 |
 | `chair.relay_url` | — | 继电器 `:8790/stretch` 地址 |
 | `git.repos` | [] | 成就墙扫描的本地仓库路径列表 |
+| `git.github_client_id` | "" | GitHub OAuth App 的 Client ID，网页授权（Device Flow）用 |
+| `git.github_username` | "" | 绑定 GitHub 账号，拉取当天全部 commits 并去重合并（授权后自动写入） |
+| `git.github_token` | "" | 授权后自动写入，也可手填 PAT；访问私有仓库 commits 需要 |
 | `server.host` / `port` | 127.0.0.1 / 8787 | 监听地址 |
 
 `m`（睡眠时长）当前由配置提供；未来可由 T5AI/可穿戴接入后自动写入。

@@ -43,7 +43,6 @@
     new ResizeObserver(reportH).observe(card);
 
     document.getElementById('close').addEventListener('click', () => window.lumia.dismiss());
-
     window.lumia.onEvent((event) => {
       titleEl.textContent = event.title || 'Lumia';
       msgEl.textContent = event.message || '';

@@ -23,12 +23,12 @@ Lumia 的软件端「本地大脑 + 桌面外壳」实现。硬件端约定见
   │  T5AI / 久坐   │   │  · 时长引擎 (n+k*m/延时)   │   │  · 系统托盘         │
   │  / 椅子继电器  │◀──│  · 提醒调度 + 久坐检测     │──▶│  · 非抢焦点弹窗     │
   └───────────────┘   │  · 灵感落库 / 成就墙       │   │  · 设置(空白)/成就墙 │
-                      │  · SQLite + 事件总线       │   └────────────────────┘
+                      │  · JSON 存储 + 事件总线   │   └────────────────────┘
                       └──────────────────────────┘
 ```
 
 - **后端（`backend/`，Python）**：唯一真相源。两个后台循环——1s 的开发计时器、30s 的
-  提醒调度器——加一组 REST 接口。状态落 SQLite。
+  提醒调度器——加一组 REST 接口。状态落 JSON 文件。
 - **前端（`electron/`，Electron）**：只做展示与交互。轮询 `/api/events/poll` 拿事件后弹窗，
   托盘菜单发起动作。不含业务判定。
 - 两端通过 `127.0.0.1:8787` 通信，前端与硬件端用的是**同一套** HTTP 接口。
@@ -43,7 +43,7 @@ Lumia_works/
 │   ├── lumia/
 │   │   ├── app.py          # FastAPI 应用 + 后台循环 + 路由
 │   │   ├── config.py       # config.json 读写（线程安全，深合并）
-│   │   ├── db.py           # SQLite 封装
+│   │   ├── db.py           # JSON 存储封装
 │   │   ├── events.py       # 内存事件总线（供前端轮询）
 │   │   ├── activity.py     # 前台进程 + 空闲检测（Windows ctypes，跨平台降级）
 │   │   ├── coding.py       # 开发时长引擎（额度/延时/周衰减）★核心
@@ -144,7 +144,7 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 - 延时把 `allowed_effective = allowed + delay_minutes`，并记 `delay_ends_at = now + delay_minutes`；
   到点或额度耗尽即 `day_locked`，并持久化 `locked=1`（重启当天仍锁定）。
 - **每日一次**：`delay_available` 仅要求「今天未用」。
-- 前端锁定页双重触发：事件边沿（`coding_limit`/`coding_locked`）+ 每 5s 对照 `/api/state` 电平补开，
+- 前端锁定页双重触发：事件边沿（`coding_limit`/`coding_locked`）+ 每秒对照 `/api/state` 电平补开（防强制关闭锁定窗），
   后端重启导致事件 id 回退时自动重同步水位。
 
 > 说明：延时既是「最后 60~90 分钟收尾」，也是「今天到此为止」的信号——用完即当日硬停，
@@ -233,10 +233,11 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 
 ---
 
-## 9. 数据存储（SQLite，`backend/lumia.db`）
+## 9. 数据存储（JSON，`backend/lumia.json`）
 
-`coding_daily`（每日用量/延时/锁定）、`delay_log`（延时历史，驱动周衰减）、
-`ideas`（灵感）、`sit_events`（就座事件）、`reminders_log`（提醒记录）。
+单文件 JSON，写入时先写临时文件再原子替换防损坏。顶层键：
+`coding_daily`（按日期索引的每日用量/延时/锁定/保存缓冲）、`delay_log`（延时历史，驱动周衰减）、
+`ideas`（灵感）、`sit_events`（就座事件）、`reminders_log`（提醒记录）、`seq`（各表自增 id 计数）。
 
 ---
 
@@ -248,6 +249,5 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 - `m` 睡眠时长目前手填；可接 T5AI/手环自动采集。
 - 成就墙的 "builds" 暂未统计（当前只列 commits）；可接 CI/构建日志。
 - 音频灵感仅落盘保存，未做转写；可挂本地 whisper。
-- 手动「请求延时」不校验是否已耗尽额度（便于调试）；如需严格按产品规则，
-  可在 `coding.request_delay` 增加 `used >= allowed` 前置判断。
+- 手动「请求延时」严格校验：未达今日上限或当日已用过延时均拒绝（一天仅一次）。
 - 设置界面留空，后续对接 `/api/config` 即可做成可视化配置。

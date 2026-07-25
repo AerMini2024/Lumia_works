@@ -197,23 +197,43 @@ function toggleFullscreen(win) {
     st.fsRestore = win.getBounds();
     log('float', winTag(win) + ' fullscreen enter');
     if (st.retractTimer) { clearTimeout(st.retractTimer); st.retractTimer = null; }
+    if (st.animTimer) { clearInterval(st.animTimer); st.animTimer = null; }
     if (st.retracted) { st.retracted = false; win.webContents.send('retracted-changed', false); }
-    animateBounds(win, { x: wa.x, y: wa.y, width: wa.width, height: wa.height }, FLOAT.animMs);
+    const b = st.fsRestore;
+    win.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height });
     win.moveTop();
     win.webContents.send('fullscreen-changed', true);
+    win.webContents.send('fs-zoom', {
+      from: { x: b.x - wa.x, y: b.y - wa.y, width: b.width, height: b.height },
+      ms: FLOAT.animMs,
+    });
   } else {
-    st.isFullscreen = false;
+    if (st.fsExitTimer) return;
     st.collapsed = false;
     log('float', winTag(win) + ' fullscreen exit', { detached: st.detached });
     win.webContents.send('fullscreen-changed', false);
+    let target;
     if (st.detached) {
       const back = st.fsRestore || win.getBounds();
-      animateBounds(win, { x: back.x, y: back.y, width: st.width, height: st.height }, FLOAT.animMs);
+      target = { x: back.x, y: back.y, width: st.width, height: st.height };
     } else {
       collapseSiblings(win);
       reflow(true);
-      scheduleRetract(win);
+      target = { x: floatX(st), y: slotY(floats.indexOf(win)), width: st.width, height: st.height };
+      st.slotYCache = target.y;
     }
+    win.webContents.send('fs-zoom', {
+      to: { x: target.x - wa.x, y: target.y - wa.y, width: target.width, height: target.height },
+      ms: FLOAT.animMs,
+    });
+    st.fsExitTimer = setTimeout(() => {
+      st.fsExitTimer = null;
+      if (win.isDestroyed()) return;
+      if (st.animTimer) { clearInterval(st.animTimer); st.animTimer = null; }
+      win.setBounds(target);
+      st.isFullscreen = false;
+      if (!st.detached) scheduleRetract(win);
+    }, FLOAT.animMs + 30);
   }
 }
 
@@ -282,6 +302,7 @@ function createFloat({ key, file, width, height, title, noRetract, autoHeight, e
     if (st.animTimer) clearInterval(st.animTimer);
     if (st.retractTimer) clearTimeout(st.retractTimer);
     if (st.dragTimer) clearInterval(st.dragTimer);
+    if (st.fsExitTimer) clearTimeout(st.fsExitTimer);
     floatState.delete(win.id);
     reflow(true);
   });
@@ -573,8 +594,14 @@ async function checkLockdownState() {
 async function requestDelay() {
   try {
     const s = await api('/api/state');
+    const cs = (s.coding && s.coding.state) || '';
     const d = (s.coding && s.coding.delay) || {};
-    if (d.available) {
+    if (cs !== 'limit_reached') {
+      enqueuePopup({
+        type: 'delay_feedback', title: '延时不可用',
+        message: d.used_today ? '今天已经用过延时了' : '还没到今日开发上限，不需要延时', actions: [],
+      });
+    } else if (d.available) {
       enqueuePopup({
         type: 'delay_confirm', title: '开启延时？',
         message: `本次开发时间将延长 ${d.minutes} 分钟，到时后无法再继续开发. 确定开启吗?`,
@@ -698,10 +725,15 @@ ipcMain.on('float-drag-start', (e) => {
   if (st.dragTimer) { clearInterval(st.dragTimer); st.dragTimer = null; }
   const cursorStart = screen.getCursorScreenPoint();
   const boundsStart = w.getBounds();
+  let lastX = boundsStart.x, lastY = boundsStart.y;
   st.dragTimer = setInterval(() => {
     if (w.isDestroyed()) { clearInterval(st.dragTimer); return; }
     const c = screen.getCursorScreenPoint();
-    w.setPosition(boundsStart.x + (c.x - cursorStart.x), boundsStart.y + (c.y - cursorStart.y));
+    const nx = boundsStart.x + (c.x - cursorStart.x);
+    const ny = boundsStart.y + (c.y - cursorStart.y);
+    if (nx === lastX && ny === lastY) return;
+    lastX = nx; lastY = ny;
+    w.setBounds({ x: nx, y: ny, width: boundsStart.width, height: boundsStart.height });
   }, FRAME_MS);
 });
 ipcMain.on('float-drag-end', (e) => {
@@ -762,7 +794,6 @@ function buildTray() {
   const menu = Menu.buildFromTemplate([
     { label: '查看今日状态', click: showStatusPopup },
     { label: '成就墙', click: openAchievements },
-    { label: '请求延时', click: requestDelay },
     { type: 'separator' },
     { label: '设置…', click: openSettings },
     { label: '开发者面板', click: openDevPanel },
@@ -799,7 +830,7 @@ app.whenReady().then(() => {
   buildTray();
   initLastEventId().then(() => {
     setInterval(pollEvents, CFG.pollIntervalMs);
-    setInterval(checkLockdownState, 5000);
+    setInterval(checkLockdownState, 1000);
   });
 });
 

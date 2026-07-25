@@ -1,9 +1,3 @@
-"""FastAPI application: routes + background loops.
-
-Single-process "local brain". Two asyncio loops run for the lifetime of the
-app: a 1-second coding-time ticker and a 30-second reminder scheduler. The
-Electron front-end talks to this over localhost HTTP.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +15,6 @@ from .db import Database
 from .events import EventBus
 from .reminders import Reminders
 
-# -- singletons ---------------------------------------------------------
 config = Config()
 db = Database()
 bus = EventBus()
@@ -29,7 +22,6 @@ tracker = CodingTracker(config, db, bus)
 reminders = Reminders(config, db, bus)
 
 
-# -- request models -----------------------------------------------------
 class TextIdea(BaseModel):
     text: str
     source: str = "manual"
@@ -44,7 +36,10 @@ class ChairRequest(BaseModel):
     source: str = "manual"
 
 
-# -- background loops ---------------------------------------------------
+class DevUsed(BaseModel):
+    minutes: float
+
+
 async def _coding_loop() -> None:
     while True:
         try:
@@ -53,7 +48,7 @@ async def _coding_loop() -> None:
                 float(config.get("coding", "idle_threshold_seconds", default=60)),
             )
             tracker.tick(coding_now, dt=1)
-        except Exception:  # never let the loop die
+        except Exception:
             pass
         await asyncio.sleep(1)
 
@@ -80,13 +75,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Lumia Local Brain", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # local-only service
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# -- meta ---------------------------------------------------------------
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "lumia", "version": app.version}
@@ -101,20 +95,37 @@ def state() -> dict[str, Any]:
     }
 
 
-# -- coding limit -------------------------------------------------------
 @app.post("/api/coding/delay")
 def coding_delay() -> dict[str, Any]:
     return tracker.request_delay()
 
 
-# -- events -------------------------------------------------------------
+@app.post("/api/coding/save-grace")
+def coding_save_grace() -> dict[str, Any]:
+    return tracker.request_save_grace()
+
+
+@app.post("/api/dev/reset")
+def dev_reset() -> dict[str, Any]:
+    return tracker.reset_today()
+
+
+@app.post("/api/dev/reset-history")
+def dev_reset_history() -> dict[str, Any]:
+    return tracker.reset_history()
+
+
+@app.post("/api/dev/set-used")
+def dev_set_used(body: DevUsed) -> dict[str, Any]:
+    return tracker.set_used_today(int(round(body.minutes * 60)))
+
+
 @app.get("/api/events/poll")
 def events_poll(after: int = Query(0, ge=0)) -> dict[str, Any]:
     evts = bus.poll(after)
     return {"events": evts, "latest_id": bus.latest_id()}
 
 
-# -- idea capture (mirrors HARDWARE_PROTOCOL.md) ------------------------
 @app.post("/api/capture/text")
 def capture_text(body: TextIdea) -> dict[str, Any]:
     return ideas.add_text(db, body.text, source=body.source)
@@ -131,7 +142,6 @@ def get_ideas(limit: int = Query(100, ge=1, le=1000)) -> dict[str, Any]:
     return {"ideas": ideas.list_ideas(db, limit)}
 
 
-# -- sit / chair --------------------------------------------------------
 @app.post("/api/sit")
 def report_sit(body: SitReport) -> dict[str, Any]:
     return reminders.update_sit(body.seated, body.pressure)
@@ -142,13 +152,11 @@ def chair_stretch(body: ChairRequest) -> dict[str, Any]:
     return chair.stretch(config, source=body.source)
 
 
-# -- achievements -------------------------------------------------------
 @app.get("/api/achievements/today")
 def achievements_today() -> dict[str, Any]:
     return gitstats.achievements(config)
 
 
-# -- config -------------------------------------------------------------
 @app.get("/api/config")
 def get_config() -> dict[str, Any]:
     return config.all()

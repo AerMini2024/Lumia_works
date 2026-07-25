@@ -1,12 +1,3 @@
-"""Foreground-app + idle detection.
-
-Used to decide whether the current second counts as "coding": the foreground
-window must belong to a configured dev process AND the user must not be idle.
-
-Implemented with pure ``ctypes`` (no extra deps) on Windows. On other platforms
-it degrades gracefully: ``foreground_process`` returns ``None`` and
-``idle_seconds`` returns ``0`` so time is simply not counted there.
-"""
 from __future__ import annotations
 
 import sys
@@ -26,7 +17,6 @@ if _IS_WINDOWS:
         _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
 
     def foreground_process() -> str | None:
-        """Return the executable name (e.g. ``Code.exe``) of the focused window."""
         hwnd = _user32.GetForegroundWindow()
         if not hwnd:
             return None
@@ -52,7 +42,6 @@ if _IS_WINDOWS:
             _kernel32.CloseHandle(handle)
 
     def idle_seconds() -> float:
-        """Seconds since the last keyboard/mouse input."""
         info = LASTINPUTINFO()
         info.cbSize = ctypes.sizeof(LASTINPUTINFO)
         if not _user32.GetLastInputInfo(ctypes.byref(info)):
@@ -60,17 +49,57 @@ if _IS_WINDOWS:
         millis = _kernel32.GetTickCount() - info.dwTime
         return max(0.0, millis / 1000.0)
 
-else:  # pragma: no cover - non-Windows fallback
+else:
 
-    def foreground_process() -> str | None:
-        return None
+    if sys.platform.startswith("linux"):
+        import re
+        import subprocess
 
-    def idle_seconds() -> float:
-        return 0.0
+        def _run(cmd: list[str]) -> str | None:
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+            except Exception:
+                return None
+            if out.returncode != 0:
+                return None
+            return out.stdout.strip()
+
+        def foreground_process() -> str | None:
+            raw = _run(["xprop", "-root", "-notype", "_NET_ACTIVE_WINDOW"])
+            if not raw:
+                return None
+            m = re.search(r"0x[0-9a-fA-F]+", raw)
+            if not m or int(m.group(0), 16) == 0:
+                return None
+            pid_raw = _run(["xprop", "-id", m.group(0), "-notype", "_NET_WM_PID"])
+            if not pid_raw:
+                return None
+            pm = re.search(r"(\d+)\s*$", pid_raw)
+            if not pm:
+                return None
+            try:
+                with open(f"/proc/{pm.group(1)}/comm", encoding="utf-8") as f:
+                    name = f.read().strip()
+                return name or None
+            except OSError:
+                return None
+
+        def idle_seconds() -> float:
+            raw = _run(["xprintidle"])
+            if raw is None or not raw.isdigit():
+                return 0.0
+            return int(raw) / 1000.0
+
+    else:
+
+        def foreground_process() -> str | None:
+            return None
+
+        def idle_seconds() -> float:
+            return 0.0
 
 
 def is_coding(dev_processes: list[str], idle_threshold: float) -> bool:
-    """True when a dev app is focused and the user is actively at the keyboard."""
     proc = foreground_process()
     if proc is None:
         return False

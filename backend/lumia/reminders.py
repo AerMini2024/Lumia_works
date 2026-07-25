@@ -1,13 +1,3 @@
-"""Reminder scheduler + sedentary detection.
-
-A single low-frequency loop (called ~every 30s) drives:
-
-* clock reminders  — sleep time, meal times (each fires once per day),
-* interval reminders — drink water / move (every N minutes),
-* sedentary nudge  — driven by the chair pressure sensor; when the developer
-  has been continuously seated past the threshold we emit a "move" reminder and
-  (optionally) ask the chair to stretch.
-"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -24,18 +14,15 @@ class Reminders:
         self._cfg = config
         self._db = db
         self._bus = bus
-        # sit state
         self.seated: bool = False
         self.seated_since: datetime | None = None
         self.last_pressure: float | None = None
         self._last_sedentary_nudge: datetime | None = None
-        # firing bookkeeping
-        self._fired_clock: set[str] = set()  # "date|kind|HH:MM"
+        self._fired_clock: set[str] = set()
         self._fired_day: str = date.today().isoformat()
         self._last_water: datetime = datetime.now()
         self._last_move: datetime = datetime.now()
 
-    # -- sensor input ----------------------------------------------------
     def update_sit(self, seated: bool, pressure: float | None) -> dict[str, Any]:
         now = datetime.now()
         self.last_pressure = pressure
@@ -63,11 +50,10 @@ class Reminders:
             "sedentary_minutes": int(self._cfg.get("sit", "sedentary_minutes", default=45)),
         }
 
-    # -- periodic tick ---------------------------------------------------
     def tick(self) -> None:
         now = datetime.now()
         today = now.date().isoformat()
-        if today != self._fired_day:  # new day -> reset clock reminders
+        if today != self._fired_day:
             self._fired_clock.clear()
             self._fired_day = today
 
@@ -90,7 +76,6 @@ class Reminders:
                 continue
             target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
             key = f"{self._fired_day}|{kind}|{hhmm}"
-            # fire within a 2-minute window after the target, once per day
             if key not in self._fired_clock and target <= now < target + timedelta(minutes=2):
                 self._fired_clock.add(key)
                 self._emit(kind, title, message)

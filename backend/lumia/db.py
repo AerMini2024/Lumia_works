@@ -1,9 +1,3 @@
-"""SQLite persistence.
-
-A single connection guarded by a lock is plenty for this local, low-traffic
-service. Stores per-day coding usage, delay history, captured ideas, sit
-events and a reminder log.
-"""
 from __future__ import annotations
 
 import sqlite3
@@ -16,11 +10,12 @@ DB_PATH = BASE_DIR / "lumia.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS coding_daily (
-    date            TEXT PRIMARY KEY,   -- ISO date, local
+    date            TEXT PRIMARY KEY,
     used_seconds    INTEGER NOT NULL DEFAULT 0,
-    delay_used      INTEGER NOT NULL DEFAULT 0,   -- 0/1
-    delay_ends_at   TEXT,               -- ISO timestamp or NULL
-    locked          INTEGER NOT NULL DEFAULT 0    -- 0/1 hard stop for the day
+    delay_used      INTEGER NOT NULL DEFAULT 0,
+    delay_ends_at   TEXT,
+    locked          INTEGER NOT NULL DEFAULT 0,
+    save_grace_used INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS delay_log (
@@ -33,10 +28,10 @@ CREATE TABLE IF NOT EXISTS delay_log (
 CREATE TABLE IF NOT EXISTS ideas (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts          TEXT NOT NULL,
-    kind        TEXT NOT NULL,          -- 'text' | 'audio'
+    kind        TEXT NOT NULL,
     text        TEXT,
     audio_path  TEXT,
-    source      TEXT,                   -- e.g. 't5ai', 'orangepi', 'manual'
+    source      TEXT,
     uploaded    INTEGER NOT NULL DEFAULT 1
 );
 
@@ -64,8 +59,14 @@ class Database:
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+            try:
+                self._conn.execute(
+                    "ALTER TABLE coding_daily ADD COLUMN save_grace_used INTEGER NOT NULL DEFAULT 0"
+                )
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
-    # -- generic helpers -------------------------------------------------
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
             cur = self._conn.execute(sql, params)
@@ -80,13 +81,12 @@ class Database:
         with self._lock:
             return self._conn.execute(sql, params).fetchone()
 
-    # -- coding_daily ----------------------------------------------------
     def get_day(self, date: str) -> dict[str, Any]:
         row = self.query_one("SELECT * FROM coding_daily WHERE date = ?", (date,))
         if row is None:
             self.execute("INSERT INTO coding_daily (date) VALUES (?)", (date,))
             row = self.query_one("SELECT * FROM coding_daily WHERE date = ?", (date,))
-        return dict(row)  # type: ignore[arg-type]
+        return dict(row)
 
     def set_day(self, date: str, **fields: Any) -> None:
         if not fields:
@@ -109,6 +109,13 @@ class Database:
             "INSERT INTO delay_log (date, ts, minutes) VALUES (?, ?, ?)",
             (date, ts, minutes),
         )
+
+    def clear_delay_log(self, date: str) -> None:
+        self.execute("DELETE FROM delay_log WHERE date = ?", (date,))
+
+    def clear_coding_history(self) -> None:
+        self.execute("DELETE FROM delay_log")
+        self.execute("DELETE FROM coding_daily")
 
     def last_delay_date(self) -> str | None:
         row = self.query_one("SELECT MAX(date) AS d FROM delay_log")

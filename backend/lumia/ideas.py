@@ -1,9 +1,3 @@
-"""Idea capture store.
-
-Receives the developer's "sudden ideas" from the T5AI-Core devkit (relayed via
-the Orange Pi 3B when the server comes online) or the manual UI. Text ideas are
-stored inline; audio is written under ``backend/data/audio`` and referenced.
-"""
 from __future__ import annotations
 
 import uuid

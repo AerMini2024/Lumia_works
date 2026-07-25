@@ -5,7 +5,7 @@ Lumia 的软件端「本地大脑 + 桌面外壳」实现。硬件端约定见
 
 本实现覆盖 4 个目标：
 
-1. **限制开发时长**：每日额度 `n + k*m` 小时，用尽后支持一次延时；两天内只能延时一次；
+1. **限制开发时长**：每日额度 `n + k*m` 小时，用尽后支持一次延时（当日未用即可用）；
    延时后当日硬停；每周内每用一次延时，`k` 衰减为 `0.8*k`（周一重置）。
 2. **接收「突发奇想」**：T5AI-Core 语音 / 文本经 Orange Pi 3B 转发到服务端落库。
 3. **时长耗尽后展示今日成绩**：扫描本地 git 仓库列出当日 commits（成就墙）。
@@ -128,7 +128,9 @@ allowed_hours = n + k_eff * m
 - 距上次键鼠输入 < `coding.idle_threshold_seconds`（默认 60s，避免挂机计时）。
 
 Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW` /
-`GetLastInputInfo`），无额外依赖；非 Windows 平台降级为「不计时」。
+`GetLastInputInfo`），无额外依赖；Linux(X11) 下用 `xprop` 取前台窗口 PID 后读
+`/proc/<pid>/comm`，空闲时间用 `xprintidle`（需安装 `xprop` / `xprintidle`，
+缺失时降级为「不计时」）；Wayland 及其他平台降级为「不计时」。
 
 ### 4.3 状态机
 
@@ -141,7 +143,9 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 
 - 延时把 `allowed_effective = allowed + delay_minutes`，并记 `delay_ends_at = now + delay_minutes`；
   到点或额度耗尽即 `day_locked`，并持久化 `locked=1`（重启当天仍锁定）。
-- **两天内一次**：`delay_available` 要求「今天未用」且「上次延时距今 ≥ 2 天」。
+- **每日一次**：`delay_available` 仅要求「今天未用」。
+- 前端锁定页双重触发：事件边沿（`coding_limit`/`coding_locked`）+ 每 5s 对照 `/api/state` 电平补开，
+  后端重启导致事件 id 回退时自动重同步水位。
 
 > 说明：延时既是「最后 60~90 分钟收尾」，也是「今天到此为止」的信号——用完即当日硬停，
 > 对应产品规则第 3 条。`delay_minutes` 可在配置里设为 60~90。
@@ -223,18 +227,24 @@ Windows 下用纯 `ctypes`（`GetForegroundWindow` / `QueryFullProcessImageNameW
 - **托盘图标**：用 `nativeImage.createFromBitmap` 现场生成 16×16 BGRA，无需二进制素材。
 - **设置窗口**：`settings.html` 目前是空白占位，仅验证「托盘 → 设置」打开流程。
 - **可选拉起后端**：`config.json.backend.spawn=true` 时由主进程 `spawn` Python，退出时回收。
+- **Linux 适配**：启动时强制 `ozone-platform-hint=x11`（Wayland 下走 XWayland，否则浮窗
+  `setBounds` 定位不可用），并开启 `enable-transparent-visuals` + 禁用硬件加速以兼容
+  透明窗口；托盘需要 libappindicator。
 
 ---
 
 ## 9. 数据存储（SQLite，`backend/lumia.db`）
 
-`coding_daily`（每日用量/延时/锁定）、`delay_log`（延时历史，驱动周衰减与两天限制）、
+`coding_daily`（每日用量/延时/锁定）、`delay_log`（延时历史，驱动周衰减）、
 `ideas`（灵感）、`sit_events`（就座事件）、`reminders_log`（提醒记录）。
 
 ---
 
 ## 10. 已知边界 / 后续可扩展
 
+- Linux 仅支持 X11/XWayland：计时依赖 `xprop` + `xprintidle`，纯 Wayland 下拿不到
+  前台窗口，降级为不计时；`/proc/<pid>/comm` 进程名截断为 15 字符，配置
+  `dev_processes` 时需注意。
 - `m` 睡眠时长目前手填；可接 T5AI/手环自动采集。
 - 成就墙的 "builds" 暂未统计（当前只列 commits）；可接 CI/构建日志。
 - 音频灵感仅落盘保存，未做转写；可挂本地 whisper。

@@ -1,16 +1,3 @@
-"""Coding-time limit engine.
-
-Rules (from the product spec):
-
-1. Daily quota = ``n + k*m`` hours, where ``n`` is a fixed daily allowance,
-   ``k`` a conversion coefficient and ``m`` sleep hours.
-2. When the quota is exhausted the developer may invoke a one-time **delay**
-   (60-90 min). Only one delay is allowed within any 2-day window.
-3. Using a delay grants a final ``delay_minutes`` block; once it ends the day is
-   hard-locked (no more development today).
-4. Each delay used earlier in the same ISO week shrinks ``k`` by a factor of
-   0.8 (``k_eff = k * 0.8**delays_this_week``); the penalty resets every Monday.
-"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -26,7 +13,7 @@ def _today() -> str:
 
 
 def _week_start(d: date) -> date:
-    return d - timedelta(days=d.weekday())  # Monday
+    return d - timedelta(days=d.weekday())
 
 
 class CodingTracker:
@@ -37,9 +24,7 @@ class CodingTracker:
         self._state: str = "idle"
         self._active_date = _today()
 
-    # -- quota maths -----------------------------------------------------
     def _penalty_exponent(self, today: date) -> int:
-        """Number of distinct delay days earlier this ISO week (before today)."""
         start = _week_start(today)
         yesterday = today - timedelta(days=1)
         if yesterday < start:
@@ -62,17 +47,9 @@ class CodingTracker:
     def _delay_minutes(self) -> int:
         return int(self._cfg.get("coding", "delay_minutes", default=60))
 
-    # -- delay availability ---------------------------------------------
     def delay_available(self, day: dict[str, Any]) -> bool:
-        if day["delay_used"]:
-            return False
-        last = self._db.last_delay_date()
-        if last is None:
-            return True
-        gap = (date.today() - date.fromisoformat(last)).days
-        return gap >= 2  # only one delay within any 2-day window
+        return not day["delay_used"]
 
-    # -- per-tick update -------------------------------------------------
     def tick(self, coding_now: bool, dt: int = 1) -> None:
         today = _today()
         if coding_now:
@@ -109,7 +86,6 @@ class CodingTracker:
                 actions=[{"id": "achievements", "label": "查看成就墙"}],
             )
 
-    # -- snapshot for API/state -----------------------------------------
     def snapshot(self) -> dict[str, Any]:
         today = date.today()
         day = self._db.get_day(today.isoformat())
@@ -131,7 +107,7 @@ class CodingTracker:
         elif used >= allowed:
             state = "limit_reached" if self.delay_available(day) else "day_locked"
         else:
-            from . import activity  # local import to avoid cost when unused
+            from . import activity
 
             coding_now = activity.is_coding(
                 self._cfg.get("coding", "dev_processes", default=[]),
@@ -139,7 +115,6 @@ class CodingTracker:
             )
             state = "coding" if coding_now else "idle"
 
-        # Persist a hard lock so a restart keeps the day closed.
         if state == "day_locked" and not day["locked"]:
             self._db.set_day(today.isoformat(), locked=1)
 
@@ -155,6 +130,7 @@ class CodingTracker:
             "k_base": float(self._cfg.get("coding", "conversion_k", default=0.5)),
             "k_effective": round(self._k_effective(today), 4),
             "week_delay_penalty": self._penalty_exponent(today),
+            "save_grace_used": bool(day["save_grace_used"]),
             "delay": {
                 "available": self.delay_available(day),
                 "used_today": delay_used,
@@ -163,14 +139,11 @@ class CodingTracker:
             },
         }
 
-    # -- actions ---------------------------------------------------------
     def request_delay(self) -> dict[str, Any]:
         today = date.today()
         day = self._db.get_day(today.isoformat())
         if day["delay_used"]:
             return {"ok": False, "reason": "今天已经用过延时了。"}
-        if not self.delay_available(day):
-            return {"ok": False, "reason": "两天内只能使用一次延时。"}
         minutes = self._delay_minutes()
         ends_at = (datetime.now() + timedelta(minutes=minutes)).isoformat(
             timespec="seconds"
@@ -184,3 +157,39 @@ class CodingTracker:
             f"最后 {minutes} 分钟，用完今天就真的下班了。",
         )
         return {"ok": True, "ends_at": ends_at, "minutes": minutes}
+
+    def request_save_grace(self) -> dict[str, Any]:
+        today = _today()
+        day = self._db.get_day(today)
+        if day["save_grace_used"]:
+            return {"ok": False, "reason": "保存文件的机会今天已经用过了。"}
+        minutes = 5
+        ends_at = (datetime.now() + timedelta(minutes=minutes)).isoformat(
+            timespec="seconds"
+        )
+        self._db.set_day(today, save_grace_used=1)
+        return {"ok": True, "ends_at": ends_at, "minutes": minutes}
+
+    def reset_today(self) -> dict[str, Any]:
+        today = _today()
+        self._db.get_day(today)
+        self._db.set_day(today, used_seconds=0, delay_used=0, delay_ends_at=None, locked=0, save_grace_used=0)
+        self._db.clear_delay_log(today)
+        self._state = "idle"
+        self._active_date = today
+        return {"ok": True, "date": today}
+
+    def reset_history(self) -> dict[str, Any]:
+        self._db.clear_coding_history()
+        self._state = "idle"
+        self._active_date = _today()
+        self._db.get_day(self._active_date)
+        return {"ok": True}
+
+    def set_used_today(self, seconds: int) -> dict[str, Any]:
+        today = _today()
+        seconds = max(0, int(seconds))
+        self._db.get_day(today)
+        self._db.set_day(today, used_seconds=seconds)
+        self._evaluate()
+        return {"ok": True, "used_seconds": seconds}

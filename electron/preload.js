@@ -1,5 +1,4 @@
 'use strict';
-/** Preload bridge shared by popup / settings / achievements windows. */
 const { contextBridge, ipcRenderer } = require('electron');
 
 function readArg(prefix) {
@@ -14,26 +13,37 @@ contextBridge.exposeInMainWorld('lumia', {
   baseUrl,
   title,
 
-  // --- reminder popup -> main ---
   onEvent: (cb) => ipcRenderer.on('show-event', (_e, data) => cb(data)),
   action: (payload) => ipcRenderer.send('popup-action', payload),
   dismiss: () => ipcRenderer.send('popup-dismiss'),
 
-  // --- custom window chrome (settings / achievements floats) ---
   win: {
     close: () => ipcRenderer.send('win-close'),
     toggleFullscreen: () => ipcRenderer.send('win-toggle-fullscreen'),
+    collapseToggle: () => ipcRenderer.send('float-collapse-toggle'),
+    dragStart: () => ipcRenderer.send('float-drag-start'),
+    dragEnd: () => ipcRenderer.send('float-drag-end'),
     setHover: (hovering) => ipcRenderer.send('float-hover', hovering),
-    onFullscreenChanged: (cb) =>
-      ipcRenderer.on('fullscreen-changed', (_e, isFull) => cb(isFull)),
+    reportHeight: (h) => ipcRenderer.send('float-content-height', h),
     onRetractedChanged: (cb) =>
       ipcRenderer.on('retracted-changed', (_e, retracted) => cb(retracted)),
+    onFullscreenChanged: (cb) =>
+      ipcRenderer.on('fullscreen-changed', (_e, isFull) => cb(isFull)),
   },
 
-  // --- native directory picker (git repos) ---
   pickDirectory: () => ipcRenderer.invoke('pick-directory'),
 
-  // --- HTTP helpers ---
+  lockdown: {
+    requestDelay: () => ipcRenderer.invoke('lockdown-delay'),
+    requestSave: () => ipcRenderer.invoke('lockdown-save'),
+    cancel: () => ipcRenderer.send('lockdown-cancel'),
+  },
+
+  dev: {
+    emit: (event) => ipcRenderer.send('dev-emit', event),
+    open: (key) => ipcRenderer.send('dev-open', key),
+  },
+
   fetchJSON: async (pathname) => {
     const res = await fetch(baseUrl + pathname);
     return res.json();

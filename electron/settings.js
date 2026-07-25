@@ -1,22 +1,13 @@
 'use strict';
-/* Settings window logic.
- *
- *  - loads /api/config, then overlays any locally-persisted draft
- *  - every edit updates an in-memory `working` copy + persists a draft to
- *    localStorage (so closing the window without saving keeps changes)
- *  - "保存" opens a 15s countdown overlay; only when it elapses do we PUT
- *    the config. The countdown is cancellable ("撤销保存"), keeping the draft.
- */
 (function () {
   const DRAFT_KEY = 'lumia.settings.draft';
   const COUNTDOWN_SECONDS = 15;
 
-  let baseline = {};   // last-known server state
-  let working = {};    // baseline + local edits
+  let baseline = {};
+  let working = {};
   let dirty = false;
   let countdownTimer = null;
 
-  // ---- generic nested get/set ----------------------------------------
   function getPath(obj, path) {
     return path.split('.').reduce((n, k) => (n == null ? undefined : n[k]), obj);
   }
@@ -31,7 +22,6 @@
   }
   function clone(o) { return JSON.parse(JSON.stringify(o == null ? {} : o)); }
 
-  // ---- draft persistence ---------------------------------------------
   function saveDraft() {
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(working)); } catch (_) {}
   }
@@ -45,7 +35,6 @@
     } catch (_) { return null; }
   }
 
-  // ---- status footer --------------------------------------------------
   const statusEl = document.getElementById('status');
   function setStatus(text, cls) {
     statusEl.textContent = text;
@@ -55,10 +44,8 @@
     dirty = true;
     saveDraft();
     setStatus('有未保存的更改', 'dirty');
-    renderQuotaPreview();
   }
 
-  // ---- field <-> working binding -------------------------------------
   function coerce(input, raw) {
     if (input.type === 'number') {
       const n = parseFloat(raw);
@@ -74,7 +61,6 @@
       input.value = val;
     });
     updateChairEnabled();
-    renderQuotaPreview();
   }
 
   function bindFields() {
@@ -88,7 +74,6 @@
     });
   }
 
-  // ---- list / tag editors --------------------------------------------
   function renderList(container) {
     const path = container.dataset.list;
     const items = getPath(working, path) || [];
@@ -116,7 +101,6 @@
   function bindListEditors() {
     document.querySelectorAll('[data-list]').forEach((container) => {
       const path = container.dataset.list;
-      // The add row is the next .tag-add sibling within the same field.
       const field = container.closest('.field');
       const addRow = field ? field.querySelector('.tag-add') : null;
       if (!addRow) return;
@@ -144,18 +128,6 @@
     document.querySelectorAll('[data-list]').forEach(renderList);
   }
 
-  // ---- quota preview --------------------------------------------------
-  function renderQuotaPreview() {
-    const el = document.getElementById('quotaPreview');
-    if (!el) return;
-    const n = parseFloat(getPath(working, 'coding.daily_fixed_hours')) || 0;
-    const k = parseFloat(getPath(working, 'coding.conversion_k')) || 0;
-    const m = parseFloat(getPath(working, 'coding.sleep_hours')) || 0;
-    const total = n + k * m;
-    el.textContent = `每日额度 = n + k×m = ${n} + ${k}×${m} = ${total.toFixed(2)} 小时（${Math.round(total * 60)} 分钟）`;
-  }
-
-  // ---- chair panel ----------------------------------------------------
   function updateChairEnabled() {
     const mode = getPath(working, 'chair.mode');
     const relay = document.getElementById('relayUrl');
@@ -177,7 +149,6 @@
     });
   }
 
-  // ---- directory picker (git repos) ----------------------------------
   function bindBrowseRepo() {
     const btn = document.getElementById('browseRepo');
     if (!btn) return;
@@ -193,7 +164,6 @@
     });
   }
 
-  // ---- nav switching --------------------------------------------------
   function bindNav() {
     const items = document.querySelectorAll('.nav-item');
     items.forEach((item) => {
@@ -206,7 +176,6 @@
     });
   }
 
-  // ---- two-phase save -------------------------------------------------
   const overlay = document.getElementById('saveOverlay');
   const countNum = document.getElementById('countNum');
   const barFill = document.getElementById('overlayBarFill');
@@ -218,9 +187,8 @@
     barFill.style.transition = 'none';
     barFill.style.width = '100%';
     overlay.classList.add('show');
-    // Kick the bar animation on the next frame so the transition applies.
     requestAnimationFrame(() => {
-      barFill.style.transition = 'width 1s linear';
+      barFill.style.transition = 'width ' + COUNTDOWN_SECONDS + 's linear';
       barFill.style.width = '0%';
     });
     countdownTimer = setInterval(() => {
@@ -234,6 +202,11 @@
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     overlay.classList.remove('show');
     setStatus('已撤销保存，更改仍暂存', 'dirty');
+  }
+
+  function applyNow() {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    commitSave();
   }
 
   async function commitSave() {
@@ -256,6 +229,7 @@
   function bindSaveReset() {
     document.getElementById('saveBtn').addEventListener('click', beginSave);
     document.getElementById('undoSave').addEventListener('click', cancelSave);
+    document.getElementById('applyNow').addEventListener('click', applyNow);
     document.getElementById('resetBtn').addEventListener('click', () => {
       if (countdownTimer) cancelSave();
       working = clone(baseline);
@@ -267,7 +241,6 @@
     });
   }
 
-  // ---- bootstrap ------------------------------------------------------
   async function init() {
     bindNav();
     bindFields();

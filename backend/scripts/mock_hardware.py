@@ -1,14 +1,3 @@
-"""Mock the Lumia hardware endpoints for local testing (no devices needed).
-
-Usage examples (backend must be running):
-
-    python scripts/mock_hardware.py idea "重构 event bus"
-    python scripts/mock_hardware.py sit --seated --pressure 0.7
-    python scripts/mock_hardware.py sit --no-seated
-    python scripts/mock_hardware.py stretch
-    python scripts/mock_hardware.py delay
-    python scripts/mock_hardware.py state
-"""
 from __future__ import annotations
 
 import argparse

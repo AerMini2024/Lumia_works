@@ -1,8 +1,3 @@
-"""Achievement wall — today's git commits (and a best-effort build count).
-
-When the coding quota is spent we surface what the developer actually shipped
-today by scanning the configured local repositories with ``git log``.
-"""
 from __future__ import annotations
 
 import subprocess

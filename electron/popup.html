@@ -7,7 +7,7 @@
     html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
       font-family: "Segoe UI", "Microsoft YaHei", sans-serif; -webkit-user-select: none; cursor: default; }
     .card {
-      box-sizing: border-box; height: calc(100% - 16px); margin: 8px;
+      box-sizing: border-box; margin: 8px;
       background: rgba(28, 27, 34, 0.96); color: #f2f0f7; border-radius: 14px;
       padding: 14px 16px; display: flex; flex-direction: column;
       box-shadow: 0 8px 28px rgba(0,0,0,0.45); border: 1px solid rgba(224,136,122,0.35);
@@ -20,6 +20,7 @@
     button:hover { background: #3b3947; }
     button.primary { background: #e0887a; color: #201b1a; font-weight: 600; }
     button.primary:hover { background: #ec9a8d; }
+    button:disabled { opacity: 0.45; pointer-events: none; }
     .close { position: absolute; top: 12px; right: 16px; font-size: 14px; color: #8a8697; }
   </style>
 </head>
@@ -34,7 +35,12 @@
     const titleEl = document.getElementById('title');
     const msgEl = document.getElementById('msg');
     const actionsEl = document.getElementById('actions');
-    let dismissTimer = null;
+    const card = document.querySelector('.card');
+    let hasContent = false;
+    const reportH = () => {
+      if (hasContent) window.lumia.win.reportHeight(Math.ceil(card.getBoundingClientRect().height) + 16);
+    };
+    new ResizeObserver(reportH).observe(card);
 
     document.getElementById('close').addEventListener('click', () => window.lumia.dismiss());
 
@@ -47,16 +53,18 @@
         const btn = document.createElement('button');
         btn.textContent = a.label;
         if (idx === 0) btn.className = 'primary';
-        btn.addEventListener('click', () => window.lumia.action({ id: a.id }));
+        btn.addEventListener('click', () => {
+          actionsEl.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+          window.lumia.action({ id: a.id });
+        });
         actionsEl.appendChild(btn);
       });
       const dismiss = document.createElement('button');
-      dismiss.textContent = '知道了';
+      dismiss.textContent = event.dismissLabel || '确定';
       dismiss.addEventListener('click', () => window.lumia.dismiss());
       actionsEl.appendChild(dismiss);
-
-      if (dismissTimer) clearTimeout(dismissTimer);
-      dismissTimer = setTimeout(() => window.lumia.dismiss(), 12000);
+      hasContent = true;
+      reportH();
     });
   </script>
 </body>

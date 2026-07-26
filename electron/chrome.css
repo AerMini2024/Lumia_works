@@ -44,6 +44,9 @@ body.is-fullscreen .lumia-window {
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+/* 标题栏按钮：button 默认不继承 body 字体，显式继承 Minecraft AE */
+.tb-btn { font-family: inherit; }
+
 .tb-fs {
   font-size: 12px;
   color: #f5b7ad;

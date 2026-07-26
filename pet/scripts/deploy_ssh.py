@@ -26,7 +26,7 @@ import paramiko
 
 ROOT = Path(__file__).resolve().parent.parent
 REMOTE_DIR = "lumia-desktopPet"  # 相对远端 $HOME
-INCLUDE = ["main.py", "requirements.txt", "lumia", "assets", "scripts", "deploy"]
+INCLUDE = ["main.py", "start.sh", "requirements.txt", "lumia", "assets", "scripts", "deploy"]
 EXCLUDE_NAMES = {"__pycache__", ".venv", "build", "dist", "_probe_remote.py", "_probe_remote2.py"}
 
 # 远端为 Xfce + X11 (lightdm)，直接绑定 :0 与用户 Xauthority
@@ -86,7 +86,7 @@ def deploy(client: paramiko.SSHClient) -> None:
     # 保留 .venv（在 REMOTE_DIR 内）避免重复装依赖：只删源码目录再解压
     code, out, err = run(
         client,
-        f"cd ~ && for d in main.py requirements.txt lumia assets scripts deploy; do rm -rf {REMOTE_DIR}/$d; done; "
+        f"cd ~ && for d in main.py start.sh requirements.txt lumia assets scripts deploy; do rm -rf {REMOTE_DIR}/$d; done; "
         f"tar -xzf lumia-src.tar.gz && rm lumia-src.tar.gz && ls {REMOTE_DIR}",
         timeout=60,
     )
@@ -95,7 +95,12 @@ def deploy(client: paramiko.SSHClient) -> None:
         sys.exit(1)
 
 
-START_CMD = f"bash ~/{REMOTE_DIR}/deploy/remote_start.sh"
+# 远端启动：统一走根目录 start.sh（绑定 X11 会话 + 清华镜像）
+START_CMD = (
+    f'export DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority" XDG_SESSION_TYPE=x11 '
+    f'PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple; '
+    f"bash ~/{REMOTE_DIR}/start.sh start"
+)
 
 
 def main() -> None:
@@ -125,7 +130,7 @@ def main() -> None:
             show("nohup 日志", *run(client, f"tail -30 ~/{REMOTE_DIR}/nohup.log 2>/dev/null || true"))
             show("应用日志", *run(client, "tail -40 ~/.local/share/lumia-pet/logs/lumia.log 2>/dev/null || echo '<无日志>'"))
         elif args.action == "stop":
-            show("停止", *run(client, "pkill -f '[m]ain\\.py --debug' && echo stopped || echo '<未运行>'"))
+            show("停止", *run(client, f"bash ~/{REMOTE_DIR}/start.sh stop"))
         elif args.action == "logs":
             show("应用日志", *run(client, "tail -80 ~/.local/share/lumia-pet/logs/lumia.log 2>/dev/null || echo '<无日志>'"))
         elif args.action == "screenshot":

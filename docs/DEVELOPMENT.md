@@ -55,6 +55,7 @@ Lumia_works/
 │   ├── config.example.json # 默认配置模板（首次运行复制成 config.json）
 │   ├── requirements.txt
 │   └── run.py              # 入口：python run.py
+├── pet/                    # Lumia 桌宠（PyQt6，仅在 Ubuntu 上运行，独立进程，详见 pet/README.md）
 ├── electron/
 │   ├── main.js             # 主进程：托盘 / 弹窗 / 轮询 / 可选拉起后端
 │   ├── preload.js          # contextBridge：window.lumia
